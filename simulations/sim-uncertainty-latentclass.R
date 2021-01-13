@@ -135,24 +135,25 @@ for (j in 1:M) {
   # true class memberships
   res.j[["true"]] <- DeltasClassSpecific(
     C=obs_C_true,X=obs_data[,Xnames],Z=obs_data$Z,Y=obs_data$Y)
-  # switch labels so that class 1 effect < class 2 effect
-  res.j[["est"]] <- est[,order(est["IPW.gee",])]
   # misclassification
   if (meth=="poLCA") {
     fixed_C <- mixOut$predclass
   } else if (meth=="mclust") {
     fixed_C <- mixOut$classification
   }
-  if (any(order(est["IPW.gee",])!=(1:2))) {
-    fixed_C <- 3-fixed_C # switch labels
-  }
   res.j[["confusion_fixed"]] <- matrix(
     table("true"=obs_C_true,"fixed"=fixed_C)/n,nrow=2)
+  # switch labels to align with true classes
+  if(sum(diag(res.j[["confusion_fixed"]]))<0.5) {
+    fixed_C <- 3-fixed_C # switch labels
+    res.j[["est"]] <- est[,2:1]
+  }
   rm(est,fixed_C)
   
   # parametric bootstrap
   mc.te <- list()
   mc.jit <- list()
+  mc.confusion <- list()
   mc_C_resample <- NULL
   resample <- TRUE
   while(resample) {
@@ -185,28 +186,35 @@ for (j in 1:M) {
       # class-specific estimates under resampled class memberships
       mc_est <-DeltasClassSpecific(
         C=mc_C,X=obs_data[,Xnames],Z=obs_data$Z,Y=obs_data$Y)
-      # switch labels so that class 1 effect < class 2 effect
-      mc.te <- c(mc.te, list(mc_est[,order(mc_est["IPW.gee",])]))
-      if (any(order(mc_est["IPW.gee",])!=(1:2))) {
+      # misclassification
+      mc_confusion <- matrix(table("true"=obs_C_true,"fixed"=mc_C)/n,nrow=2)
+      # switch labels to align with true classes
+      if(sum(diag(mc_confusion))<0.5) {
         mc_C <- 3-mc_C # switch labels
+        mc_est <- mc_est[,2:1]
+        mc_confusion <- mc_confusion[,2:1]
       }
+      mc.te <- c(mc.te, list(mc_est))
       mc_C_resample <- cbind(mc_C_resample,mc_C)
-      rm(mc_est,mc_C)
+      mc.confusion <- c(mc.confusion, list(mc_confusion))
+      rm(mc_est,mc_C,mc_confusion)
       
       resample <- (length(mc.te) < m)
     }
   }
   res.j[["boot.ci"]] <- sapply(1:2, function(cl) {
-    c("IPW.gee"=mean(unlist(lapply(mc.te, function(te) te["IPW.gee",cl])),na.rm=TRUE),
+    c("IPW.gee"=mean(unlist(lapply(mc.te, function(te) te["IPW",cl])),na.rm=TRUE),
       "ci.low"=min(unlist(lapply(mc.te, function(te) te["ci.low",cl])),na.rm=TRUE),
       "ci.upp"=max(unlist(lapply(mc.te, function(te) te["ci.upp",cl])),na.rm=TRUE))
   })
-  
-  res.j[["confusion_boot"]] <- matrix(rowMeans(
-    apply(mc_C_resample,2,function(mc_C) {
-      table("true"=obs_C_true,"fixed"=mc_C)/n
-    })),nrow=2)
-  rm(obs_C_true,mc_C_resample)
+  res.j[["boot.ci.95"]] <- sapply(1:2, function(cl) {
+    c("ci.low"=quantile(unlist(lapply(mc.te, function(te) te["ci.low",cl])),probs=.05,
+                        na.rm=TRUE),
+      "ci.upp"=quantile(unlist(lapply(mc.te, function(te) te["ci.upp",cl])),probs=0.95,
+                        na.rm=TRUE))
+  })
+  res.j[["confusion_boot"]] <- Reduce('+', mc.confusion)/length(mc.confusion)
+  rm(obs_C_true,mc_C_resample,mc.confusion)
   
   res.j[["simsetting"]] <- simsettings[seed,]
   res[[j]] <- res.j
