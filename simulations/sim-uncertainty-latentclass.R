@@ -208,6 +208,12 @@ for (j in 1:M) {
       "ci.upp"=max(unlist(lapply(mc.te, function(te) te["ci.upp",cl])),na.rm=TRUE))
   })
   res.j[["boot.ci.95"]] <- sapply(1:2, function(cl) {
+    c("ci.low"=quantile(unlist(lapply(mc.te, function(te) te["ci.low",cl])),probs=.025,
+                        na.rm=TRUE),
+      "ci.upp"=quantile(unlist(lapply(mc.te, function(te) te["ci.upp",cl])),probs=0.975,
+                        na.rm=TRUE))
+  })
+  res.j[["boot.ci.90"]] <- sapply(1:2, function(cl) {
     c("ci.low"=quantile(unlist(lapply(mc.te, function(te) te["ci.low",cl])),probs=.05,
                         na.rm=TRUE),
       "ci.upp"=quantile(unlist(lapply(mc.te, function(te) te["ci.upp",cl])),probs=0.95,
