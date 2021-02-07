@@ -8,7 +8,7 @@ source("helper_functions.R")
 
 # simulation settings
 simsettings <- expand.grid("meth"=c("poLCA","mclust"),
-                           "Lambda"=c(0.8,0.6))
+                           "Lambda"=c(8,6)/10)
 simsettings
 
 # initialize for parallel cluster jobs
@@ -143,10 +143,12 @@ for (j in 1:M) {
   }
   res.j[["confusion_fixed"]] <- matrix(
     table("true"=obs_C_true,"fixed"=fixed_C)/n,nrow=2)
+  res.j[["est"]] <- est
   # switch labels to align with true classes
   if(sum(diag(res.j[["confusion_fixed"]]))<0.5) {
     fixed_C <- 3-fixed_C # switch labels
-    res.j[["est"]] <- est[,2:1]
+    res.j[["est"]] <- res.j[["est"]] [,2:1]
+    res.j[["confusion_fixed"]] <- res.j[["confusion_fixed"]][,2:1]
   }
   rm(est,fixed_C)
   
@@ -203,27 +205,32 @@ for (j in 1:M) {
     }
   }
   res.j[["boot.ci"]] <- sapply(1:2, function(cl) {
-    c("IPW.gee"=mean(unlist(lapply(mc.te, function(te) te["IPW",cl])),na.rm=TRUE),
-      "ci.low"=min(unlist(lapply(mc.te, function(te) te["ci.low",cl])),na.rm=TRUE),
-      "ci.upp"=max(unlist(lapply(mc.te, function(te) te["ci.upp",cl])),na.rm=TRUE))
+    c("IPW"=res.j$est["IPW",cl],
+      "ci.low"=min(unlist(lapply(mc.te, function(te) te["ci.low",cl])),
+                   na.rm=TRUE),
+      "ci.upp"=max(unlist(lapply(mc.te, function(te) te["ci.upp",cl])),
+                   na.rm=TRUE))
   })
   res.j[["boot.ci.95"]] <- sapply(1:2, function(cl) {
-    c("ci.low"=quantile(unlist(lapply(mc.te, function(te) te["ci.low",cl])),probs=.025,
-                        na.rm=TRUE),
-      "ci.upp"=quantile(unlist(lapply(mc.te, function(te) te["ci.upp",cl])),probs=0.975,
-                        na.rm=TRUE))
+    c("IPW"=res.j$est["IPW",cl],
+      "ci.low"=quantile(unlist(lapply(mc.te, function(te) te["ci.low",cl])),
+                        probs=.025,na.rm=TRUE),
+      "ci.upp"=quantile(unlist(lapply(mc.te, function(te) te["ci.upp",cl])),
+                        probs=0.975,na.rm=TRUE))
   })
   res.j[["boot.ci.90"]] <- sapply(1:2, function(cl) {
-    c("ci.low"=quantile(unlist(lapply(mc.te, function(te) te["ci.low",cl])),probs=.05,
-                        na.rm=TRUE),
-      "ci.upp"=quantile(unlist(lapply(mc.te, function(te) te["ci.upp",cl])),probs=0.95,
-                        na.rm=TRUE))
+    c("IPW"=res.j$est["IPW",cl],
+      "ci.low"=quantile(unlist(lapply(mc.te, function(te) te["ci.low",cl])),
+                        probs=.05,na.rm=TRUE),
+      "ci.upp"=quantile(unlist(lapply(mc.te, function(te) te["ci.upp",cl])),
+                        probs=0.95,na.rm=TRUE))
   })
   res.j[["confusion_boot"]] <- Reduce('+', mc.confusion)/length(mc.confusion)
   rm(obs_C_true,mc_C_resample,mc.confusion)
   
   res.j[["simsetting"]] <- simsettings[seed,]
   res[[j]] <- res.j
+  rm(res.j)
   save(res,file=paste0("sim-",meth,"-",seed,".Rdata"))
   cat(j,"|",round((proc.time()[3]-ptm)/60),
       "mins  ############################################################## \n")

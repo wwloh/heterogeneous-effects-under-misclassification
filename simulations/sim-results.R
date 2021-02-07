@@ -17,7 +17,7 @@ res_all <- vector(mode = "list", length = nrow(simsettings))
 res_cm <- NULL
 
 for (ll in myfiles) {
-  load(paste0(subfolder,ll))
+load(paste0(subfolder,ll))
   # sim setting
   ll_sim <- unique(do.call(rbind,lapply(res, "[[", "simsetting")))
   ll_sim_idx <- which(apply(apply(simsettings, 1, "==", ll_sim),2,all))
@@ -42,10 +42,10 @@ for (ll in myfiles) {
 
 # confusion matrices
 res_cm <- do.call(rbind,res_cm)
-res_cm <- cbind(res_cm,
-                "correct"=rowSums(res_cm[, c(4,7)]),
-                "incorrect"=rowSums(res_cm[, c(5,6)]))
-res_cm[,c("1","2","3","4")] <- NULL
+res_cm[,c("2","3")] <- NULL
+colnames(res_cm)[4:5] <- paste0("est.class.",1:2)
+res_cm$est.class.1 <- res_cm$est.class.1/(1-res_cm$Lambda)
+res_cm$est.class.2 <- res_cm$est.class.2/res_cm$Lambda
 res_cm_summ <- by(res_cm[,4:5], INDICES=res_cm[,1:3], function(x) 
   round(c("mean"=colMeans(x),"sd"=apply(x,2,sd)),2))
 res_cm_summ <- cbind(expand.grid(dimnames(res_cm_summ)),
@@ -58,27 +58,31 @@ for (ss in 1:length(res_all)) {
   nas <- unlist(lapply(res_list, function(x) any(unlist(lapply(x,is.na)))))
   res <- res_list[!nas]
   rm(res_list)
-  length(res)
   
   # calculate population effects
   meth <- as.character(simsettings[ss,"meth"])
   Lambda <- simsettings[ss,"Lambda"]
   source2("sim-uncertainty-latentclass.R",27,92)
   
-  # misclassification rates
+  # correctly classified in each class
   res_cm <- res_cm_summ[res_cm_summ$meth==meth & res_cm_summ$Lambda==Lambda,]
   
   # summarize results
   res_summary <- lapply(res, function(onesim) {
     unlist(lapply(onesim, function(onesim_meth) {
-      c("est"=onesim_meth["IPW.gee",],
-        "bias"=onesim_meth["IPW.gee",]-pop_effs["IPW.gee",],
+      c("est"=onesim_meth[1,],
+        "bias"=onesim_meth[1,]-pop_effs["IPW",],
         "cover"=sapply(1:2, function(cl) {
-          as.integer((onesim_meth["ci.low",cl] <= pop_effs["IPW.gee",cl]) &
-                       (onesim_meth["ci.upp",cl] >= pop_effs["IPW.gee",cl]))
+          as.integer(
+            (onesim_meth[grep("ci.low",row.names(onesim_meth)),cl] 
+             <= pop_effs["IPW",cl]) &
+              (onesim_meth[grep("ci.upp",row.names(onesim_meth)),cl] 
+               >= pop_effs["IPW",cl]))
         }),
         "halfwidth"=sapply(1:2, function(cl) {
-          as.numeric((onesim_meth["ci.upp",cl]-onesim_meth["ci.low",cl])/2)
+          as.numeric(
+            (onesim_meth[grep("ci.upp",row.names(onesim_meth)),cl]-
+               onesim_meth[grep("ci.low",row.names(onesim_meth)),cl])/2)
         })
       )
     }))
@@ -86,51 +90,35 @@ for (ss in 1:length(res_all)) {
   res_summary <- do.call(rbind,res_summary)
   colnames(res_summary)
   
+  cat("---------------------------------------------------------------------\n")
   print(simsettings[ss,])
-  print(pop_effs["IPW.gee",])
+  print(length(res))
+  print(pop_effs["IPW",])
   print(ate)
-  print(xtable(t(sapply(c("true","est[.]","boot"), function(mm) {
+  print(xtable(t(sapply(c("true","est[.]","boot.ci.95"), function(mm) {
     mm_av <- colMeans(res_summary[,grep(mm,colnames(res_summary),value=TRUE)])
     mm_se <- apply(res_summary[,grep(mm,colnames(res_summary),value=TRUE)],2,sd)
+    mm_mse <- sqrt(
+      (mm_av[grep("bias",names(mm_av),value=TRUE)]^2+
+         mm_se[grep("[.]est",names(mm_av),value=TRUE)]^2))
     if (mm=="true") {
       mm_cm <- rep(NA,2)  
     } else {
-      res_cm_mm <- mm
       if (mm=="est[.]") {
         res_cm_mm <- "fixed"
+      } else {
+        res_cm_mm <- "boot"
       }
-      mm_cm <- res_cm[res_cm$type==res_cm_mm,c("mean.correct","sd.correct")]
+      mm_cm <- res_cm[res_cm$type==res_cm_mm,c("mean.est.class.1",
+                                               "mean.est.class.2")]
     }
-    c(mm_av[-c(1:2)],mm_se[grep("[.]est",names(mm_se))],mm_cm)
+    # results table
+    as.numeric(c(
+      mm_av[grep("bias",names(mm_av),value=TRUE)],
+      # mm_se[grep("[.]est",names(mm_av),value=TRUE)],
+      # mm_mse,
+      mm_av[grep("cover",names(mm_av),value=TRUE)],
+      mm_av[grep("halfwidth",names(mm_av),value=TRUE)],
+      mm_cm))
   }))))
-  
-  meths <- c("true.est","est.est","boot.ci.est")
-  names(meths) <- c("True","Fixed","Perturbed")
-  est_density <- apply(res_summary[,sapply(meths, function(mm) 
-    grep(mm,colnames(res_summary),value=TRUE))],2,density)
-  my_xlim <- lapply(est_density, "[[", "x")
-  my_xlim <- sapply(1:2, function(cs) range(my_xlim[grep(cs,names(my_xlim))]))
-  my_ylim <- lapply(est_density, "[[", "y")
-  my_ylim <- sapply(1:2, function(cs) range(my_ylim[grep(cs,names(my_ylim))]))
-  
-  filename <- gsub("[.]","_",paste0("sim-",meth,"-",Lambda))
-  pdf(paste0(filename,".pdf"),height=9,width=9)
-  par(mfrow=c(3,3))
-  for (mm in meths) {
-    res_bias <- res_summary[,grep(mm,colnames(res_summary),value=TRUE)]
-    plot(res_bias,
-         main=names(meths)[meths==mm],
-         col="grey50",pch=19,cex=.5,
-         xlab="Class 1",ylab="Class 2",xlim=my_xlim[,1],ylim=my_xlim[,2])
-    abline(v=pop_effs["IPW.gee",1],lty=2,lwd=2)
-    abline(h=pop_effs["IPW.gee",2],lty=2,lwd=2)
-    for (s in 1:2) {
-      plot(density(res_bias[,s]),
-           xlim=my_xlim[,s],ylim=my_ylim[,s],
-           xlab="Estimated effects",
-           main=paste0(names(meths)[meths==mm]," (Class ", s,")"))
-      abline(v=pop_effs["IPW.gee",s],lty=2,lwd=2)
-    }
-  }
-  dev.off()
 }
