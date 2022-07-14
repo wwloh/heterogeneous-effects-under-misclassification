@@ -11,7 +11,7 @@ rm(source2)
 
 # load saved results ===========================================================
 library("xtable")
-subfolder <- "sim-uncertainty-latentclass/"
+subfolder <- "sim2-trajectories/"
 myfiles <- list.files(subfolder)
 myfiles <- grep(pattern=".Rdata",myfiles,value=TRUE)
 res_all <- vector(mode = "list", length = nrow(simsettings))
@@ -28,13 +28,9 @@ for (ll in myfiles) {
                do.call(rbind,lapply(
                  lapply(res, "[[", "confusion_fixed"),as.vector)))
   res_cm <- c(res_cm,list(cm1))
-  cm2 <- cbind("type"="boot",ll_sim,
-               do.call(rbind,lapply(
-                 lapply(res, "[[", "confusion_boot"),as.vector)))
-  res_cm <- c(res_cm,list(cm2))
-  rm(cm1,cm2)
+  rm(cm1)
   res <- lapply(res, function(x) {
-    x[c("simsetting","confusion_fixed","confusion_boot")] <- NULL
+    x[c("simsetting","confusion_fixed")] <- NULL
     x
   })
   res_all[[ll_sim_idx]] <- c(res_all[[ll_sim_idx]],res)
@@ -77,7 +73,7 @@ for (ss in 1:length(res_all)) {
   est_types <- unlist(strsplit(grep("ATE",row.names(res[[1]]$true),value=TRUE),
                                split=".ATE"))
   ## methods to determine class memberships
-  meths_type <- expand.grid("estci"=c("true","est","boot.ci.95","boot.ci"),
+  meths_type <- expand.grid("estci"=c("true","est"),
                             "et"=est_types,
                             stringsAsFactors=FALSE)
   
@@ -124,9 +120,20 @@ for (ss in 1:length(res_all)) {
     )
     colnames(onesim.res.bc) <- colnames(onesim.res)
     onesim.res <- rbind(onesim.res,onesim.res.bc)
-    return(onesim.res)
+    
+    # trajectories
+    colnames(onesim$trajectories) <- paste0("class",1:ncol(onesim$trajectories))
+    onesim.res.traj <- lapply(1:nrow(onesim$trajectories), function(i) {
+      onesim$trajectories[i,]
+    })
+    names(onesim.res.traj) <- row.names(onesim$trajectories)
+    onesim.res.traj <- onesim.res.traj[c(3:5,1:2)]
+    onesim.res.traj <- unlist(onesim.res.traj)
+    
+    return(list(onesim.res,onesim.res.traj))
   })
-  res_summary <- do.call(rbind,res_summary)
+  res_summary.traj <- do.call(rbind,lapply(res_summary,"[[",2L))
+  res_summary <- do.call(rbind,lapply(res_summary,"[[",1L))
   
   cat("---------------------------------------------------------------------\n")
   print(simsettings[ss,])
@@ -179,4 +186,11 @@ for (ss in 1:length(res_all)) {
   res_tab[,paste0("rmse.bias",1:2)] <- res_tab[,paste0("rmse.bias",1:2)]*100
   
   print(xtable(res_tab),include.rownames=FALSE)
+  
+  res_summary.traj <- res_summary.traj[,c(1:7,9,8,10)]
+  print(xtable(data.frame(res_tab[1,1:3],
+                          t(colMeans(res_summary.traj)[-(5:6)]),
+                          t(pop_effs))),
+        include.rownames=FALSE)
+  
 }

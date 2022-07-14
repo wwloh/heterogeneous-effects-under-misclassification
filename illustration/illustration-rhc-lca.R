@@ -1,8 +1,11 @@
+library("poLCA")
+library("Hmisc")
+
 # data preparation
 # observational study
 Hmisc::getHdata(rhc,where="https://hbiostat.org/data/repo/")
 dim(rhc) # number of obs
-summary(rhc$swang1) # number of treated vs. untreated
+table(rhc$swang1) # number of treated vs. untreated
 rhc <- rhc[,names(rhc)[order(names(rhc))]] # order column names alphabetically
 for (cc in 1:ncol(rhc)) {
   cat(names(rhc)[cc], "----------------------------------------------------\n")
@@ -99,10 +102,6 @@ names(rhc.dt) <- sapply(names(rhc.dt), function(x) {
 })
 names(rhc.dt)
 
-# remove variable with missing data
-(l.rm <- which(colSums(is.na(rhc.dt))>0))
-rhc.dt <- rhc.dt[,-l.rm]
-
 # covariates
 l <- rhc.dt[,3:ncol(rhc.dt)]
 Lnames <- data.frame(cbind("L.idx"=1:ncol(l),"L.names"=names(l)))
@@ -111,45 +110,67 @@ Lnames <- data.frame(cbind("L.idx"=1:ncol(l),"L.names"=names(l)))
 l <- apply(l, 2, function(x) as.numeric(x))
 summary(l)
 l <- as.data.frame(l)
-colnames(l) <- NULL
 obs_data <- data.frame("i"=1:nrow(l),
-                       "L"=l,
+                       l,
                        "Z"=as.integer(rhc.dt$treat),
                        "Y"=as.integer(rhc.dt$Y))
+table(obs_data[,c("Y","Z")])
+(n <- nrow(obs_data))
 summary(obs_data)
 
+rm(l,rhc,rhc.dt)
 ## Latent class analysis ======================================================
+## explanatory variables of latent class
+Xnames_nonindicators <- names(obs_data)[
+  unlist(c("i"=1,
+           "Z"=which(names(obs_data)=="Z"),
+           "Y"=which(names(obs_data)=="Y"),
+           sapply(c("age","sex","race","edu","income","ins_"), 
+                  grep, x=names(obs_data), fixed=TRUE)))]
+Xnames_nonindicators
+(Xnames_indicators <- names(obs_data)[!(names(obs_data) %in% Xnames_nonindicators)])
+
 # manifest indicators of latent class
-Xnames_indicators <- grep("L",names(obs_data),value=TRUE)[-(1:13)]
+## discretize continuous covariates
 Xcont_idx <- names(which(apply(obs_data[,Xnames_indicators], 2, function(x)
   length(unique(x)) > 10)))
 length(Xcont_idx)
 summary(obs_data[,Xcont_idx])
+#### scoma1: 54% has zero values => only three unique levels
+#### alb1: 44% have value of 3.5 => only four unique values
 for (x in Xnames_indicators) {
   if (x %in% Xcont_idx) {
     x.breaks <- unique(quantile(obs_data[,x],probs=(0:5)/5,na.rm=TRUE))
-    x.fact <- cut(obs_data[,x],breaks=x.breaks,labels=FALSE,
-                  include.lowest=TRUE,right=FALSE,ordered_result=TRUE)
+    x.fact <- cut(obs_data[,x],breaks=x.breaks,
+                  include.lowest=TRUE,ordered_result=TRUE)
+    x.fact <- as.integer(x.fact)
     obs_data[, x] <- x.fact
+    rm(x.breaks,x.fact)
   } else {
     obs_data[, x] <- obs_data[, x] + 1L # minimum value of 1
   }
-  # # new category for missing data
-  # obs_data[is.na(obs_data[, x]),x] <- max(obs_data[, x],na.rm=TRUE) + 1L
+  # new category for missing data
+  obs_data[is.na(obs_data[, x]),x] <- max(obs_data[, x],na.rm=TRUE) + 1L
 }
 summary(obs_data[,Xcont_idx])
+rm(x)
 
-# any indicators have fewer than 2 unique values
-any(apply(obs_data[,Xnames_indicators],2,max,na.rm=TRUE)<2)
+# all indicators have at least two unique values
+table(apply(obs_data[,Xnames_indicators],2,function(x) length(unique(x))))
 
-table(obs_data$Z)
-table(obs_data$Y)
-(n <- nrow(obs_data))
+Xnames <- names(obs_data)[!(names(obs_data) %in% c("i","Z","Y"))]
 
-Xnames <- grep(pattern="L.",x=colnames(obs_data),value=TRUE)
-rm(l,rhc.dt)
+# fit basic latent class model
+polca.f <- as.formula(paste0("cbind(",paste(Xnames_indicators,collapse=","),")~1"))
+polca.f
 
-# fit inclusive latent class model
-polca.f <- as.formula(
-  paste0("cbind(",paste(Xnames_indicators,collapse=","),")~",
-         paste(paste0("L.",1:13),collapse="+")))
+dataset_name <- "rhc"
+filename <- paste0("illustration-",dataset_name,"-lca.Rdata")
+
+# fit each model with different number of classes in turn
+mixLCA_k <- list()
+for (k in 2:10) {
+  # Estimate multiple times using different initial parameter values
+  mixLCA_k[[k]] <- poLCA(polca.f,data=obs_data,nclass=k,nrep=500,verbose=TRUE)
+  save.image(file=filename)
+}
